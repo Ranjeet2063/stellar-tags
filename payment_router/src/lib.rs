@@ -490,9 +490,6 @@ impl PaymentRouter {
         fee_bps: i128,
         fee_cap: i128,
     ) -> Result<(), Error> {
-        // Require sender auth
-        sender.require_auth();
-
         env.events().publish(
             (Symbol::new(env, "payment_initiated"), sender.clone()),
             amount,
@@ -1620,6 +1617,9 @@ impl PaymentRouter {
         }
         Self::verify_kyc_for_amount(&env, &sender, amount)?;
 
+        // Require sender auth
+        sender.require_auth();
+
         let (platform_treasury, fee_bps, fee_cap) = Self::load_fee_config(&env)?;
 
         Self::process_single_payment(
@@ -1684,6 +1684,22 @@ impl PaymentRouter {
                 return Err(Error::LimitExceeded);
             }
             Self::verify_kyc_for_amount(&env, &payment.sender, payment.amount)?;
+        }
+
+        // Require auth for each unique sender once in the batch to prevent redundant auth verification panics
+        let mut authorized_senders = soroban_sdk::vec![&env];
+        for payment in payments.iter() {
+            let mut already_auth = false;
+            for auth_sender in authorized_senders.iter() {
+                if auth_sender == payment.sender {
+                    already_auth = true;
+                    break;
+                }
+            }
+            if !already_auth {
+                payment.sender.require_auth();
+                authorized_senders.push_back(payment.sender.clone());
+            }
         }
 
         let (platform_treasury, fee_bps, fee_cap) = Self::load_fee_config(&env)?;
